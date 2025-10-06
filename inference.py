@@ -276,6 +276,13 @@ if __name__ == "__main__":
     except Exception as e:
         raise Exception(f"❌ Error during prediction: {e}")
 
+    preds_df = pd.DataFrame(
+        {
+            "PassengerId": df["PassengerId"],
+            "predictions": predictions,
+        }
+    )
+
     print("Predictions:")
-    print(predictions.head())
-    persist_predictions(predictions)
+    print(preds_df.head())
+    persist_predictions(preds_df)
