@@ -267,12 +267,14 @@ if __name__ == "__main__":
     # MLFlow setup
     # Set tracking URI
     mlflow.set_tracking_uri(mlflow_server_url)
+    print(f"MLflow Tracking URI: {mlflow.get_tracking_uri()}")
 
     # predict
     try:
+        print("Making predictions...")
         predictions = predict(df)
     except Exception as e:
-        Exception(f"❌ Error during prediction: {e}")
+        raise Exception(f"❌ Error during prediction: {e}")
 
     print("Predictions:")
     print(predictions.head())
