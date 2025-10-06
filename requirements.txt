@@ -1,0 +1,4 @@
+boto3
+pandas
+mlflow==2.22.1
+numpy
