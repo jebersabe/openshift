@@ -7,6 +7,109 @@ import pandas as pd
 import mlflow
 
 
+def upload_file_to_s3(
+    file_path,
+    bucket_name,
+    object_key=None,
+    endpoint_url=None,
+    aws_access_key_id=None,
+    aws_secret_access_key=None,
+    region="us-east-1",
+):
+    """
+    Upload a file to S3-compatible storage.
+
+    Args:
+        file_path (str): Path to the file to upload
+        bucket_name (str): Name of the S3 bucket
+        object_key (str, optional): S3 object key. If not specified,
+            uses filename
+        endpoint_url (str, optional): Custom endpoint URL for
+            S3-compatible services
+        aws_access_key_id (str, optional): AWS access key ID
+        aws_secret_access_key (str, optional): AWS secret access key
+        region (str): AWS region (default: us-east-1)
+
+    Returns:
+        bool: True if file was uploaded successfully, False otherwise
+    """
+
+    # Validate file exists
+    if not os.path.isfile(file_path):
+        print(f"Error: File '{file_path}' not found.")
+        return False
+
+    # Use filename as object key if not specified
+    if object_key is None:
+        object_key = Path(file_path).name
+
+    try:
+        # Create S3 client
+        s3_client = boto3.client(
+            "s3",
+            endpoint_url=endpoint_url,
+            aws_access_key_id=aws_access_key_id,
+            aws_secret_access_key=aws_secret_access_key,
+            region_name=region,
+        )
+
+        # Get file size for progress tracking
+        file_size = os.path.getsize(file_path)
+        print(
+            f"Uploading '{file_path}' ({file_size} bytes) to bucket "
+            f"'{bucket_name}' as '{object_key}'..."
+        )
+
+        # Upload the file
+        s3_client.upload_file(
+            file_path,
+            bucket_name,
+            object_key,
+            # Optional: server-side encryption
+            # ExtraArgs={"ServerSideEncryption": "AES256"},
+        )
+
+        print(f"✅ Successfully uploaded '{object_key}' to bucket " f"'{bucket_name}'")
+
+        # Generate the file URL (for AWS S3)
+        if endpoint_url is None:
+            file_url = (
+                f"https://{bucket_name}.s3.{region}." f"amazonaws.com/{object_key}"
+            )
+        else:
+            file_url = f"{endpoint_url}/{bucket_name}/{object_key}"
+
+        print(f"📁 File URL: {file_url}")
+        return True
+
+    except NoCredentialsError:
+        print(
+            "❌ Error: AWS credentials not found. " "Please configure your credentials."
+        )
+        print("You can set them via:")
+        print("  - Environment variables " "(AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)")
+        print("  - AWS credentials file (~/.aws/credentials)")
+        print("  - IAM roles (if running on EC2)")
+        return False
+
+    except ClientError as e:
+        error_code = e.response["Error"]["Code"]
+        if error_code == "NoSuchBucket":
+            print(f"❌ Error: Bucket '{bucket_name}' does not exist.")
+        elif error_code == "AccessDenied":
+            print(
+                f"❌ Error: Access denied. Check your permissions for "
+                f"bucket '{bucket_name}'."
+            )
+        else:
+            print(f"❌ Error uploading file: {e}")
+        return False
+
+    except Exception as e:
+        print(f"❌ Unexpected error: {e}")
+        return False
+
+
 def download_file_from_s3(
     bucket_name,
     object_key,
@@ -116,7 +219,21 @@ def predict(input_data):
     loaded_model = mlflow.pyfunc.load_model(logged_model)
 
     # Predict on a Pandas DataFrame.
-    loaded_model.predict(input_data)
+    return loaded_model.predict(input_data)
+
+
+def persist_predictions(df):
+    df.to_csv("/tmp/predictions.csv", index=False)
+    uploaded = upload_file_to_s3(
+        bucket_name=os.getenv("S3_BUCKET_NAME", None),
+        object_key="data/predictions.csv",
+        file_path="/tmp/predictions.csv",
+        endpoint_url=os.getenv("S3_ENDPOINT_URL", None),
+        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID", None),
+        aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY", None),
+        region=os.getenv("AWS_DEFAULT_REGION", "us-east-1"),
+    )
+    return uploaded
 
 
 if __name__ == "__main__":
@@ -153,6 +270,10 @@ if __name__ == "__main__":
 
     # predict
     try:
-        predict(df)
+        predictions = predict(df)
     except Exception as e:
         Exception(f"❌ Error during prediction: {e}")
+
+    print("Predictions:")
+    print(predictions.head())
+    persist_predictions(predictions)
